@@ -204,6 +204,7 @@ class ProxyServer:
         verify_upstream: bool = False,
         on_flow: Callable[[int, dict], None] | None = None,
         debug: bool = False,
+        auth: Any = None,
     ):
         self.ca = ca
         self.store = store
@@ -212,6 +213,7 @@ class ProxyServer:
         self.upstream_timeout = upstream_timeout
         self.on_flow = on_flow
         self.debug = debug
+        self.auth = auth  # AuthStore | None
         self._tls_cache: dict[str, ssl.SSLContext] = {}
         self._server: asyncio.AbstractServer | None = None
         self._running = False
@@ -290,6 +292,53 @@ class ProxyServer:
                 method, target, version, headers = parse_request_head(raw)
             except ValueError:
                 return
+
+            # ---- 代理层认证 ----
+            if self.auth is not None and self.auth.enabled("proxy"):
+                # 隧道内（tls_on）的请求已在上一次握手前校验过，不再重复
+                if not tls_on:
+                    hdr = headers.get("proxy-authorization") or headers.get("authorization")
+                    ok, reason = self.auth.check_basic("proxy", hdr)
+                    if not ok:
+                        body_b = (f"407 Proxy Authentication Required: {reason}").encode()
+                        writer.write(
+                            b"HTTP/1.1 407 Proxy Authentication Required\r\n"
+                            b"Proxy-Authenticate: Basic realm=\"ProxyScope\"\r\n"
+                            b"Content-Type: text/plain; charset=utf-8\r\n"
+                            b"Content-Length: " + str(len(body_b)).encode() + b"\r\n"
+                            b"Connection: close\r\n\r\n" + body_b
+                        )
+                        try:
+                            await writer.drain()
+                        except Exception:
+                            pass
+                        return
+                    # 认证通过后剥掉该头，避免泄漏给上游
+                    headers.remove("proxy-authorization")
+
+            # ---- 自环防护：目标就是本代理自身时直接拒绝，避免死循环 ----
+            _loop_host, _loop_port = None, None
+            if method.upper() == "CONNECT":
+                _loop_host, _, _ps = target.partition(":")
+                _loop_port = int(_ps) if _ps.strip().isdigit() else 443
+            elif "://" in target:
+                _u = urlsplit(target)
+                _loop_host = _u.hostname or ""
+                _loop_port = _u.port or (443 if _u.scheme == "https" else 80)
+            if _loop_host and _loop_port:
+                _lh = _loop_host.strip("[]").lower()
+                if _lh in ("127.0.0.1", "localhost", "::1", "0.0.0.0") and _loop_port == self.port:
+                    body_b = b"502 Loop detected: proxy cannot forward to itself"
+                    try:
+                        writer.write(
+                            b"HTTP/1.1 502 Bad Gateway\r\n"
+                            b"Content-Type: text/plain\r\n"
+                            b"Content-Length: " + str(len(body_b)).encode() + b"\r\n"
+                            b"Connection: close\r\n\r\n" + body_b)
+                        await writer.drain()
+                    except Exception:
+                        pass
+                    return
 
             if method.upper() == "CONNECT":
                 host, _, port_s = target.partition(":")
@@ -464,10 +513,19 @@ class ProxyServer:
             )
             await client_writer.drain()
         except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
+            # 已经拿到响应头（status>0）时的连接重置属于正常收尾，
+            # 常见于 301/302 或服务端 Keep-Alive 主动断开，不应记为错误。
+            benign = (
+                status > 0 and isinstance(
+                    exc, (ConnectionResetError, BrokenPipeError,
+                          asyncio.IncompleteReadError)
+                )
+            )
+            if not benign:
+                error = f"{type(exc).__name__}: {exc}"
+                if self.debug:
+                    print(f"[proxy] upstream {host} error: {error}")
             keep = False
-            if self.debug:
-                print(f"[proxy] upstream {host} error: {error}")
         finally:
             try:
                 up_writer.close()

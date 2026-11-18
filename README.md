@@ -43,6 +43,84 @@ VERIFY_UPSTREAM=1 ./start.sh             # 校验上游证书
 > 只想给某个工具单独配代理、不动系统设置：
 > `http://127.0.0.1:18888`（HTTP 与 HTTPS 共用同一个端口）。
 
+
+---
+
+## v1.1.0 新功能
+
+### 1. 内置认证（代理端 + 面板端）
+
+无需外加 nginx / tinyproxy，ProxyScope 自己校验 Basic 认证。
+
+```bash
+# 首次启动时直接指定账号
+python3 -m proxyscope --proxy-user psscan --proxy-pass '你的密码' \
+                      --panel-user psadmin --panel-pass '你的密码'
+```
+
+也可在面板「账号设置」里随时修改，改完立即生效、无需重启：
+
+| 范围 | 保护对象 | 失败响应 |
+|---|---|---|
+| `proxy` | 抓包代理端口 18888 | `407 Proxy Authentication Required` |
+| `panel` | Web 面板及其全部 API | `401 Unauthorized` |
+
+安全设计：
+- 密码用 **PBKDF2-HMAC-SHA256** 存储，`data/auth.json` 里只有哈希
+- 校验结果带缓存，改密码后自动失效 —— 面板响应从 ~160ms 降到 ~2ms
+- 另存一份 XOR 流加密的密文（`data/auth.key`），仅用于在面板上生成「可复制的完整代理地址」，
+  与校验哈希相互独立
+
+### 2. 请求重放 / 改包（漏洞复现）
+
+在任意一条记录上打开详情 → 「重放」页签：
+
+- 方法、URL、Header、Body 全部可改，改完直接重发
+- 支持校验/跳过上游证书
+- **重放结果自动作为新记录入库**，`client_addr` 标记为 `replay`，可基于它继续迭代
+
+### 3. 服务控制
+
+面板顶部可直接「启动 / 停止 / 重启」抓包服务。
+
+实现上用 `systemd-run --on-active=2s` 脱离当前进程执行，
+避免重启时把自己杀掉导致响应中断。
+
+### 4. 全新 UI
+
+深色 / 浅色双主题，仿 Burp 风格的原始报文展示：
+
+- 请求行 / 状态行 + Header + 空行 + Body，纯文本、等宽字体
+- 内置内容搜索（支持正则、仅显示匹配行）
+- 「复制请求 / 复制响应」一键导出标准 Burp 报文
+- 敏感 Header（Cookie / Authorization）自动折叠，点击展开
+
+### 5. 稳定性修复
+
+| 问题 | 原因 | 修复 |
+|---|---|---|
+| 重启后历史记录丢失 | `store.close()` 从未被调用，WAL 未合并 | 停机流程调用 `close()`，幂等实现 |
+| 文件句柄耗尽 | `threading.local()` 每线程建连接且不释放 | 改为单连接 + RLock |
+| 代理自环死循环 | 目标指向自身时转发给自己，等满 60s 超时 | 检测到自环立即返回 502 |
+| 面板每个请求都慢 160ms | 每次认证都重算 PBKDF2 | 校验结果缓存 |
+| 301/302 被标记为错误 | 有响应头后的连接重置被当作异常 | 区分「正常收尾」与「真错误」 |
+
+---
+
+## HTTPS 面板（可选）
+
+面板本身是明文 HTTP。需要 HTTPS 时，可用自签证书 + nginx 反代：
+
+```bash
+# 1. 生成带 IP SAN 的证书（现代浏览器只认 SAN，不认 CN）
+openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
+  -keyout panel.key -out panel.crt \
+  -subj "/CN=你的IP" \
+  -addext "subjectAltName=IP:你的IP,DNS:localhost"
+
+# 2. 导入 panel.crt 到系统/浏览器的受信任根证书，即可消除告警
+```
+
 ---
 
 ## 让系统信任根证书

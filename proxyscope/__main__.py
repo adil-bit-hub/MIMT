@@ -8,6 +8,7 @@ import sys
 import time
 from pathlib import Path
 
+from .auth import AuthStore
 from .certs import CertAuthority
 from .proxy import ProxyServer
 from .store import FlowStore
@@ -41,6 +42,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=float, default=60.0, help="上游超时秒数")
     p.add_argument("--debug", action="store_true", help="输出调试日志")
     p.add_argument("--no-web", action="store_true", help="只跑代理，不启 Web 界面")
+    p.add_argument("--auth-file", default=None,
+                   help="认证配置文件（默认 <data-dir>/auth.json）")
+    p.add_argument("--proxy-user", default=None,
+                   help="首次启动时设置代理认证用户名")
+    p.add_argument("--proxy-pass", default=None,
+                   help="首次启动时设置代理认证密码")
+    p.add_argument("--panel-user", default=None,
+                   help="首次启动时设置面板认证用户名")
+    p.add_argument("--panel-pass", default=None,
+                   help="首次启动时设置面板认证密码")
     return p
 
 
@@ -52,12 +63,20 @@ async def run(args) -> int:
     ca = CertAuthority(data_dir / "certs")
     store = FlowStore(data_dir / "flows.db", max_flows=args.max_flows)
 
+    auth_path = Path(args.auth_file).expanduser() if args.auth_file else (data_dir / "auth.json")
+    auth = AuthStore(auth_path)
+    if args.proxy_user and args.proxy_pass:
+        auth.set_credentials("proxy", args.proxy_user, args.proxy_pass)
+    if args.panel_user and args.panel_pass:
+        auth.set_credentials("panel", args.panel_user, args.panel_pass)
+
     proxy = ProxyServer(
         ca, store,
         host=args.listen, port=args.port,
         upstream_timeout=args.timeout,
         verify_upstream=args.verify_upstream,
         debug=args.debug,
+        auth=auth,
     )
     await proxy.start()
 
@@ -66,11 +85,15 @@ async def run(args) -> int:
         web = WebUI(
             store, host=args.web_host, port=args.web_port,
             ca_pem=ca.ca_pem, proxy_stats=lambda: proxy.stats,
-            verbose=args.debug,
+            verbose=args.debug, auth=auth,
         )
         web.start()
 
     print(f"  代理监听   : {args.listen}:{args.port}  (HTTP/HTTPS 通用)")
+    _pn = auth.summary("proxy")
+    _wu = auth.summary("panel")
+    print(f"  代理认证   : {'已启用 (' + _pn['username'] + ')' if _pn['enabled'] else '未启用'}")
+    print(f"  面板认证   : {'已启用 (' + _wu['username'] + ')' if _wu['enabled'] else '未启用'}")
     if web:
         print(f"  Web 界面   : http://{args.web_host}:{args.web_port}")
         print(f"  CA 证书    : http://{args.web_host}:{args.web_port}/api/ca.crt")
@@ -100,6 +123,11 @@ async def run(args) -> int:
     await proxy.stop()
     if web:
         web.stop()
+    # 关键：关闭 FlowStore，把 WAL 合并回主库，否则重启后新数据会丢
+    try:
+        store.close()
+    except Exception as exc:
+        print(f"[warn] store.close 失败: {exc}")
     return 0
 
 

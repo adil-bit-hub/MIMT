@@ -8,6 +8,10 @@ data/
 *.sqlite
 *.sqlite3
 
+# 认证凭据（v1.1.0+ 新增：密码哈希与可逆密文）
+auth.json
+auth.key
+
 # 证书与密钥
 *.key
 *.pem

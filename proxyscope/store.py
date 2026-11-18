@@ -70,7 +70,8 @@ class FlowStore:
         self.max_body = max_body
         self.max_flows = max_flows
         self._lock = threading.RLock()
-        self._local = threading.local()
+        self._shared_conn: sqlite3.Connection | None = None
+        self._writes = 0
         self._fts_ok = False
         with self._lock:
             conn = self._conn()
@@ -84,14 +85,22 @@ class FlowStore:
 
     # ---------------- 连接 ----------------
     def _conn(self) -> sqlite3.Connection:
-        conn = getattr(self._local, "conn", None)
+        """全局单连接（check_same_thread=False + 调用方持锁）。
+
+        早期版本用 threading.local 给每个线程建连接，但 asyncio 的
+        run_in_executor 会不断产生新线程，连接从不释放，
+        最终耗尽 fd（Too many open files），且各连接快照不一致导致
+        读取时看不到刚写入的数据。改为单连接共享。
+        """
+        conn = self._shared_conn
         if conn is None:
             conn = sqlite3.connect(str(self.db_path), timeout=30,
                                    check_same_thread=False)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
-            self._local.conn = conn
+            conn.execute("PRAGMA busy_timeout=30000")
+            self._shared_conn = conn
         return conn
 
     # ---------------- 写入 ----------------
@@ -167,10 +176,11 @@ class FlowStore:
     def _maybe_trim(self) -> None:
         if self.max_flows <= 0:
             return
-        if getattr(self._local, "_writes", 0) < 200:
-            self._local._writes = getattr(self._local, "_writes", 0) + 1
+        self._writes += 1
+        # 每 20 次写入检查一次 WAL 体积，阈值已降到 4MB
+        if self._writes < 20:
             return
-        self._local._writes = 0
+        self._writes = 0
         with self._lock:
             conn = self._conn()
             cnt = conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0]
@@ -193,7 +203,7 @@ class FlowStore:
         """WAL 涨到一定体积就合并回主库，避免 -wal 文件长期膨胀。"""
         try:
             wal = Path(str(self.db_path) + "-wal")
-            if wal.is_file() and wal.stat().st_size > 64 * 1024 * 1024:
+            if wal.is_file() and wal.stat().st_size > 4 * 1024 * 1024:
                 self._conn().execute("PRAGMA wal_checkpoint(TRUNCATE)")
         except (OSError, sqlite3.DatabaseError):
             pass
@@ -328,14 +338,29 @@ class FlowStore:
                 pass
 
     def close(self) -> None:
-        conn = getattr(self._local, "conn", None)
-        if conn is not None:
+        """幂等关闭：先合并 WAL 再关连接。可被重复调用。"""
+        with self._lock:
+            conn = self._shared_conn
+            if conn is None:
+                return
+            # 先置空，防止重入时二次操作同一个连接
+            self._shared_conn = None
             try:
-                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.commit()
+            except Exception:
+                pass
+            try:
+                conn.execute("PRAGMA wal_checkpoint(FULL)")
+            except Exception:
+                pass
+            try:
+                conn.execute("PRAGMA journal_mode=DELETE")
+            except Exception:
+                pass
+            try:
                 conn.close()
             except Exception:
                 pass
-            self._local.conn = None
 
     def stats(self) -> dict[str, Any]:
         conn = self._conn()
