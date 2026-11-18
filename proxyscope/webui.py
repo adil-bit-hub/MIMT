@@ -218,6 +218,19 @@ class ApiHandler(BaseHTTPRequestHandler):
             })
         if path == "/api/service":
             return self._json(self._service_status())
+        if path == "/api/ca.crl":
+            pem = b""
+            ca = getattr(self.server, "ca", None)
+            if ca is not None:
+                try:
+                    pem = ca.crl_pem()
+                except Exception:
+                    pem = b""
+            if not pem:
+                return self._err("CRL 未启用（需设置 PROXYSCOPE_CRL_URL）", 404)
+            return self._send(200, pem, "application/pkix-crl", {
+                "Content-Disposition": 'attachment; filename="proxyscope-ca.crl"'
+            })
         if path == "/api/health":
             return self._json({"ok": True, "ts": time.time()})
         return self._err("not found", 404)
@@ -386,9 +399,11 @@ class ThreadingHTTPServerQuiet(ThreadingHTTPServer):
 class WebUI:
     def __init__(self, store: FlowStore, host: str = "127.0.0.1",
                  port: int = 8787, ca_pem: bytes | None = None,
-                 proxy_stats=None, verbose: bool = False, auth=None):
+                 proxy_stats=None, verbose: bool = False, auth=None,
+                 ca=None):
         self.store = store
         self.auth = auth
+        self.ca = ca
         self.host = host
         self.port = port
         self.ca_pem = ca_pem
@@ -407,6 +422,7 @@ class WebUI:
         self._httpd.verbose = self.verbose
         self._httpd.ca_pem = self.ca_pem
         self._httpd.auth = self.auth
+        self._httpd.ca = self.ca
         self._thread = threading.Thread(
             target=self._httpd.serve_forever, name="proxyscope-web", daemon=True
         )

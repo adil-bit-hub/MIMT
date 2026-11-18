@@ -105,6 +105,38 @@ python3 -m proxyscope --proxy-user psscan --proxy-pass '你的密码' \
 | 面板每个请求都慢 160ms | 每次认证都重算 PBKDF2 | 校验结果缓存 |
 | 301/302 被标记为错误 | 有响应头后的连接重置被当作异常 | 区分「正常收尾」与「真错误」 |
 
+### 6. CRL 吊销检查支持（v1.1.1）
+
+Windows 的 Schannel（系统 curl / PowerShell / 部分工具）默认强制检查证书吊销状态。
+自签 CA 若不含 CRL 分发点，会直接报错：
+
+```
+CRYPT_E_NO_REVOCATION_CHECK (0x80092012) - 吊销功能无法检查证书是否吊销
+```
+
+设置环境变量即可自动解决 —— 叶子证书会带上 `crlDistributionPoints` 扩展，
+ProxyScope 启动时自动签发并维护 CRL 文件：
+
+```bash
+export PROXYSCOPE_CRL_URL="http://你的服务器IP/ca.crl"
+./start.sh
+```
+
+再把这个 URL 指向的 CRL 通过 Web 服务暴露出来（nginx 示例）：
+
+```nginx
+location = /ca.crl {
+    alias /path/to/data/certs/proxyscope-ca.crl;
+    default_type application/pkix-crl;
+    auth_basic off;
+}
+```
+
+也可以从 `/api/ca.crl` 获取。
+
+> 浏览器（Chrome / Edge）使用自带校验器，对用户导入的根证书不会因缺 CRL 而拒绝，
+> 所以只有命令行工具需要这个配置。临时方案是给 curl 加 `--ssl-no-revoke`。
+
 ---
 
 ## HTTPS 面板（可选）

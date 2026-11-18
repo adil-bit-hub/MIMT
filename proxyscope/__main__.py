@@ -85,7 +85,7 @@ async def run(args) -> int:
         web = WebUI(
             store, host=args.web_host, port=args.web_port,
             ca_pem=ca.ca_pem, proxy_stats=lambda: proxy.stats,
-            verbose=args.debug, auth=auth,
+            verbose=args.debug, auth=auth, ca=ca,
         )
         web.start()
 
@@ -98,6 +98,8 @@ async def run(args) -> int:
         print(f"  Web 界面   : http://{args.web_host}:{args.web_port}")
         print(f"  CA 证书    : http://{args.web_host}:{args.web_port}/api/ca.crt")
     print(f"  CA 文件    : {ca.ca_cert}")
+    if ca.crl_url:
+        print(f"  CRL 分发点 : {ca.crl_url}（已启用吊销检查支持）")
     print(f"  数据目录   : {data_dir}")
     print("\n  按 Ctrl+C 停止。\n")
 

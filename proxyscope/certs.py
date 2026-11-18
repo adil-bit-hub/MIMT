@@ -58,6 +58,19 @@ class CertAuthority:
         self.openssl = find_openssl()
         self._cache: dict[str, tuple[str, str]] = {}
         self._lock = threading.Lock()
+
+        # ── CRL（证书吊销列表）──
+        # Windows Schannel 强制做吊销检查，自签证书若无 CRL 分发点会报
+        #   CRYPT_E_NO_REVOCATION_CHECK (0x80092012)
+        # 设置 PROXYSCOPE_CRL_URL（如 http://1.2.3.4/ca.crl）后：
+        #   1. 叶子证书会带上 crlDistributionPoints 扩展
+        #   2. 启动时自动生成并维护 CRL 文件
+        # 不设置则行为与旧版一致（浏览器不受影响，curl 需 --ssl-no-revoke）。
+        self.crl_url = (os.environ.get("PROXYSCOPE_CRL_URL") or "").strip()
+        self.crl_path = self.cert_dir / "proxyscope-ca.crl"
+        self.ca_db = self.cert_dir / "ca_db"
+        if self.crl_url:
+            self._ensure_crl()
         self._ensure_ca()
 
     # ---------------- CA ----------------
@@ -82,6 +95,55 @@ class CertAuthority:
         ]
         self._run(cmd)
         ext.unlink(missing_ok=True)
+
+    # ---------------- CRL ----------------
+    def _ensure_crl(self) -> None:
+        """建立 openssl ca 数据库并生成 CRL（幂等）。"""
+        db = self.ca_db
+        db.mkdir(parents=True, exist_ok=True)
+        index = db / "index.txt"
+        crlnum = db / "crlnumber"
+        cnf = db / "openssl.cnf"
+        if not index.exists():
+            index.write_text("", encoding="utf-8")
+        if not crlnum.exists():
+            crlnum.write_text("1000\n", encoding="utf-8")
+        cnf.write_text(
+            "[ ca ]\n"
+            "default_ca = CA_default\n"
+            "\n"
+            "[ CA_default ]\n"
+            f"dir               = {db}\n"
+            f"database          = {index}\n"
+            f"crlnumber         = {crlnum}\n"
+            f"certificate       = {self.ca_cert}\n"
+            f"private_key       = {self.ca_key}\n"
+            "default_md        = sha256\n"
+            "default_crl_days  = 3650\n"
+            "policy            = policy_any\n"
+            "\n"
+            "[ policy_any ]\n"
+            "commonName = optional\n"
+            "organizationName = optional\n"
+            "countryName = optional\n"
+            "\n"
+            "[ crl_ext ]\n"
+            "authorityKeyIdentifier = keyid:always\n",
+            encoding="utf-8",
+        )
+        # 每次启动重签一份，保证 Last/Next Update 新鲜
+        self._run([
+            self.openssl, "ca", "-gencrl", "-config", str(cnf),
+            "-keyfile", str(self.ca_key), "-cert", str(self.ca_cert),
+            "-out", str(self.crl_path),
+        ])
+
+    def crl_pem(self) -> bytes:
+        """返回 CRL 内容（供 Web 服务下发）。"""
+        try:
+            return self.crl_path.read_bytes()
+        except OSError:
+            return b""
 
     # ---------------- 叶子证书 ----------------
     def get_leaf(self, host: str) -> tuple[str, str]:
@@ -119,7 +181,9 @@ class CertAuthority:
             "extendedKeyUsage=serverAuth\n"
             f"subjectAltName={alt}\n"
             "subjectKeyIdentifier=hash\n"
-            "authorityKeyIdentifier=keyid,issuer\n",
+            "authorityKeyIdentifier=keyid,issuer\n"
+            + (f"crlDistributionPoints=URI:{self.crl_url}\n"
+               if self.crl_url else ""),
             encoding="utf-8",
         )
         csr = self.leaf_dir / f"{safe}.csr"
