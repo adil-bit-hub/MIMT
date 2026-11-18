@@ -137,6 +137,37 @@ location = /ca.crl {
 > 浏览器（Chrome / Edge）使用自带校验器，对用户导入的根证书不会因缺 CRL 而拒绝，
 > 所以只有命令行工具需要这个配置。临时方案是给 curl 加 `--ssl-no-revoke`。
 
+### 7. 客户端一键接入（v1.1.2）
+
+面板顶部「客户端接入」按钮，弹窗内按 Windows / Linux / macOS 分页给出三条命令：
+
+1. **安装根证书** —— 一行命令完成下载 + 导入受信任根
+2. **配置代理** —— 一行命令写入系统或终端代理设置
+3. **验证** —— 一条 `curl` 确认链路可用
+
+证书与 CRL 同时通过 **80 端口明文 HTTP** 下发，避免"要信任证书才能下载证书"的死循环：
+
+```
+http://<你的IP>/mitm-ca.crt     MITM 抓包 CA
+http://<你的IP>/psui-ca.crt     面板 HTTPS CA
+http://<你的IP>/ca.crl          CRL
+```
+
+命令示例：
+
+```bash
+# Linux
+curl -s http://IP/mitm-ca.crt | sudo tee /usr/local/share/ca-certificates/proxyscope.crt >/dev/null && sudo update-ca-certificates
+
+# Windows (cmd)
+curl -s http://IP/mitm-ca.crt -o "%TEMP%\ps-ca.crt" && certutil -addstore -user Root "%TEMP%\ps-ca.crt" && del "%TEMP%\ps-ca.crt"
+```
+
+> 顺手修了一个前端 bug：当地址栏带有 `user:pass@` 凭据时，
+> 浏览器会拒绝用相对路径发起 `fetch`（`Request cannot be constructed from a URL
+> that includes credentials`），导致面板所有接口失效。现在加载时会自动清掉
+> 地址栏凭据，并统一改用绝对 URL。
+
 ---
 
 ## HTTPS 面板（可选）
