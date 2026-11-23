@@ -135,8 +135,13 @@ async def replay_request(flow: dict[str, Any], store: Any, *,
                          headers: Any = None,
                          body: Any = None,
                          timeout: float = 30.0,
-                         verify: bool = False) -> dict[str, Any]:
-    """执行一次重放，返回本次响应摘要，并写入 store。"""
+                         verify: bool = False,
+                         chain: Any = None) -> dict[str, Any]:
+    """执行一次重放，返回本次响应摘要，并写入 store。
+
+    chain 传入 ProxyChain 时，重放同样经出口链路发出，避免「抓包走中转、
+    重放却暴露本机 IP」的破口。链路失败不做直连回落。
+    """
     started = time.time()
 
     # ---- 1. 解析目标 ----
@@ -195,9 +200,24 @@ async def replay_request(flow: dict[str, Any], store: Any, *,
     resp_headers: list[tuple[str, str]] = []
     resp_body = b""
     error = ""
+    via_chain = bool(chain is not None and getattr(chain, "enabled", False))
 
     try:
-        if scheme == "https":
+        if via_chain:
+            ctx = None
+            if scheme == "https":
+                ctx = ssl.create_default_context()
+                if not verify:
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+            reader, writer = await chain.open_stream(
+                host, port, scheme == "https", ctx, timeout=timeout)
+            if not chain.allow_direct:
+                try:
+                    chain.note_ok()
+                except Exception:
+                    pass
+        elif scheme == "https":
             ctx = ssl.create_default_context()
             if not verify:
                 ctx.check_hostname = False
@@ -228,6 +248,13 @@ async def replay_request(flow: dict[str, Any], store: Any, *,
         error = f"重放超时（{timeout}s）"
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
+        if via_chain:
+            try:
+                chain.note_failure(exc)
+            except Exception:
+                pass
+            if not chain.allow_direct:
+                error = f"出口链路失败（{chain.route_label()}）: {error}"
 
     duration_ms = (time.time() - started) * 1000
 
@@ -255,7 +282,7 @@ async def replay_request(flow: dict[str, Any], store: Any, *,
         "tls": 1 if scheme == "https" else 0,
         "client_addr": "replay",
         "error": error,
-        "note": "replay",
+        "note": (f"replay chain:{chain.route_label()}" if via_chain else "replay"),
     }
     try:
         new_id = store.add(record)

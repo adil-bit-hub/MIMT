@@ -64,3 +64,6 @@ temp/
 *.local
 .env
 .env.*
+
+# 链路配置（含中转账号密码）
+chain.json

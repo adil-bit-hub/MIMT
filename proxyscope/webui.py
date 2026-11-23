@@ -135,7 +135,15 @@ class ApiHandler(BaseHTTPRequestHandler):
     def _run_replay(self, flow, **kwargs):
         """在同步 handler 里跑一次 async 重放。"""
         import asyncio
-        return asyncio.run(replay_request(flow, self.store, **kwargs))
+        chain = getattr(self.server, "chain", None)
+        return asyncio.run(replay_request(flow, self.store, chain=chain, **kwargs))
+
+    def _run_chain_probe(self, url: str | None = None, compare_direct: bool = True):
+        import asyncio
+        chain = getattr(self.server, "chain", None)
+        if chain is None:
+            raise RuntimeError("出口链路模块未启用")
+        return asyncio.run(chain.probe(url=url or None, compare_direct=compare_direct))
 
     # ---------------- 面板认证 ----------------
     def _auth_check(self) -> bool:
@@ -179,7 +187,24 @@ class ApiHandler(BaseHTTPRequestHandler):
             return self._json({
                 "store": self.store.stats(),
                 "proxy": (self.proxy_stats() if self.proxy_stats else {}),
+                "chain": (self.server.chain.snapshot()
+                          if getattr(self.server, "chain", None) else None),
             })
+        if path == "/api/chain":
+            chain = getattr(self.server, "chain", None)
+            if chain is None:
+                return self._err("出口链路模块未启用", 404)
+            return self._json(chain.snapshot())
+        if path == "/api/chain/test":
+            # 兼容 GET 触发探测
+            chain = getattr(self.server, "chain", None)
+            if chain is None:
+                return self._err("出口链路模块未启用", 404)
+            target = (qs.get("url") or [""])[0] or None
+            try:
+                return self._json(self._run_chain_probe(target))
+            except Exception as exc:
+                return self._err(f"探测失败: {exc}", 500)
         if path == "/api/ca.crt":
             ca = getattr(self.server, "ca_pem", None)
             if not ca:
@@ -280,6 +305,37 @@ class ApiHandler(BaseHTTPRequestHandler):
                 )
             except Exception as exc:
                 return self._err(f"重放失败: {exc}", 500)
+            return self._json(result)
+        if url.path == "/api/chain":
+            chain = getattr(self.server, "chain", None)
+            if chain is None:
+                return self._err("出口链路模块未启用", 404)
+            try:
+                snap = chain.apply(payload)
+            except Exception as exc:
+                return self._err(f"保存失败: {exc}", 400)
+            return self._json({"ok": True, "chain": snap})
+        if url.path == "/api/chain/enable":
+            chain = getattr(self.server, "chain", None)
+            if chain is None:
+                return self._err("出口链路模块未启用", 404)
+            enabled = bool(payload.get("enabled", True))
+            if enabled and not chain.hops:
+                return self._err("请先配置至少一个中转地址，再开启链路", 400)
+            try:
+                snap = chain.apply({"enabled": enabled})
+            except Exception as exc:
+                return self._err(f"切换失败: {exc}", 400)
+            return self._json({"ok": True, "chain": snap})
+        if url.path == "/api/chain/test":
+            chain = getattr(self.server, "chain", None)
+            if chain is None:
+                return self._err("出口链路模块未启用", 404)
+            target = (payload.get("url") or "").strip() or None
+            try:
+                result = self._run_chain_probe(target)
+            except Exception as exc:
+                return self._err(f"探测失败: {exc}", 500)
             return self._json(result)
         if url.path == "/api/service":
             action = (payload.get("action") or "").strip()
@@ -400,10 +456,11 @@ class WebUI:
     def __init__(self, store: FlowStore, host: str = "127.0.0.1",
                  port: int = 8787, ca_pem: bytes | None = None,
                  proxy_stats=None, verbose: bool = False, auth=None,
-                 ca=None):
+                 ca=None, chain=None):
         self.store = store
         self.auth = auth
         self.ca = ca
+        self.chain = chain
         self.host = host
         self.port = port
         self.ca_pem = ca_pem
@@ -423,6 +480,7 @@ class WebUI:
         self._httpd.ca_pem = self.ca_pem
         self._httpd.auth = self.auth
         self._httpd.ca = self.ca
+        self._httpd.chain = self.chain
         self._thread = threading.Thread(
             target=self._httpd.serve_forever, name="proxyscope-web", daemon=True
         )

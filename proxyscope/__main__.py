@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .auth import AuthStore
 from .certs import CertAuthority
+from .chain import ChainConfig, ProxyChain, split_hops
 from .proxy import ProxyServer
 from .store import FlowStore
 from .webui import WebUI
@@ -52,6 +53,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="首次启动时设置面板认证用户名")
     p.add_argument("--panel-pass", default=None,
                    help="首次启动时设置面板认证密码")
+    p.add_argument("--chain", default=None,
+                   help="出口链路：逗号分隔的中转地址，按顺序串联，"
+                        "例如 'socks5h://u:p@1.2.3.4:1080,http://5.6.7.8:8080'")
+    p.add_argument("--chain-file", default=None,
+                   help="出口链路配置文件（默认 <data-dir>/chain.json），面板保存后立即生效")
+    p.add_argument("--chain-allow-direct", action="store_true",
+                   help="链路失败时允许回落直连（默认禁止，避免泄漏本机真实 IP）")
     return p
 
 
@@ -80,12 +88,34 @@ async def run(args) -> int:
     )
     await proxy.start()
 
+    # ---- 出口链路：默认关闭（直连）；面板开启后才经中转出站 ----
+    chain_path = Path(args.chain_file).expanduser() if args.chain_file else (
+        data_dir / "chain.json")
+    chain = ProxyChain(path=chain_path)
+    chain.load()
+    if args.chain:
+        try:
+            hops = split_hops(args.chain)
+        except Exception as exc:
+            print(f"[warn] --chain 解析失败：{exc}")
+            hops = []
+        if hops:
+            try:
+                chain.apply({"hops": [h.to_dict(mask=False) for h in hops],
+                             "enabled": True,
+                             "allow_direct": bool(args.chain_allow_direct)})
+            except Exception as exc:
+                print(f"[warn] --chain 应用失败：{exc}")
+    elif args.chain_allow_direct:
+        chain.apply({"allow_direct": True})
+    proxy.chain = chain
+
     web = None
     if not args.no_web:
         web = WebUI(
             store, host=args.web_host, port=args.web_port,
             ca_pem=ca.ca_pem, proxy_stats=lambda: proxy.stats,
-            verbose=args.debug, auth=auth, ca=ca,
+            verbose=args.debug, auth=auth, ca=ca, chain=chain,
         )
         web.start()
 
@@ -98,6 +128,12 @@ async def run(args) -> int:
         print(f"  Web 界面   : http://{args.web_host}:{args.web_port}")
         print(f"  CA 证书    : http://{args.web_host}:{args.web_port}/api/ca.crt")
     print(f"  CA 文件    : {ca.ca_cert}")
+    _cs = chain.snapshot()
+    if _cs["active"]:
+        print(f"  出口链路   : 已开启 → {_cs['route']}")
+    else:
+        print(f"  出口链路   : 关闭（直连）"
+              + (f"，已配置 {_cs['hop_count']} 跳待启用" if _cs["hop_count"] else ""))
     if ca.crl_url:
         print(f"  CRL 分发点 : {ca.crl_url}（已启用吊销检查支持）")
     print(f"  数据目录   : {data_dir}")

@@ -168,6 +168,64 @@ curl -s http://IP/mitm-ca.crt -o "%TEMP%\ps-ca.crt" && certutil -addstore -user 
 > that includes credentials`），导致面板所有接口失效。现在加载时会自动清掉
 > 地址栏凭据，并统一改用绝对 URL。
 
+### 8. 出口链路：多级中转，隐藏服务器真实 IP（v1.2.0）
+
+默认链路是「客户端 → ProxyScope → 目标站」，目标侧看到的是**本机公网 IP**。
+开启出口链路后变成「客户端 → ProxyScope → 中转1 → 中转2 → … → 目标站」，
+目标侧只能看到**最后一跳中转**的 IP。
+
+面板顶部「出口链路」按钮：
+
+| 控件 | 说明 |
+|---|---|
+| 总开关 | **关＝直连（默认，不启用任何中转）**；开＝全部出站走下面的链路。切换立即生效，无需重启 |
+| 跳数列表 | 每跳可选 `http` / `https` / `socks5` / `socks5h`，填地址、端口、可选账号密码；「＋ 添加一跳」可加到任意深度 |
+| 保存并生效 | 校验通过才写入 `data/chain.json`，写盘后对后续请求立即生效 |
+| 测试出口 IP | 沿当前链路请求多个出口 IP 接口，同时给出「链路出口 IP」和「本机直连 IP」，并判断二者是否不同 |
+| 校验中转/目标 TLS 证书 | 默认关闭（便于抓自签名站点与自签证书中转） |
+| 链路失败时允许回落直连 | **默认关闭**，见下方安全语义 |
+| 单跳超时 | 每跳建链超时，默认 20 秒 |
+
+列表中经过中转的记录，HOST 下方会显示绿色的「· 中转」标记；记录 `note` 字段为
+`chain:<中转地址>`，链路不通时为 `chain:<中转地址> failed`。
+
+#### 安全语义（失败即失败）
+
+链路**开启**且配置了中转时，出站失败会直接返回 502，错误信息里写明是「出口链路失败」
+并附中转地址，**不会**静默回落直连——否则链路挂了你以为在隐身、其实在用本机 IP。
+只有显式勾选「允许回落直连」才会退而直连。
+
+#### 支持的用法
+
+```bash
+# 命令行直接指定一串中转（自动开启）
+python3 -m proxyscope --port 18888 \
+  --chain 'socks5h://user:pass@1.2.3.4:1080,http://5.6.7.8:8080'
+
+# 只指定配置文件位置，开关仍由面板控制
+python3 -m proxyscope --chain-file /opt/proxyscope/data/chain.json
+
+# 允许链路失败回落直连（不推荐）
+python3 -m proxyscope --chain-allow-direct
+```
+
+要点：
+
+- **逐跳串联**：第 1 跳直连建立，之后每跳都在上一跳的隧道内发起 `CONNECT`，
+  所以中间各跳只看到相邻一跳，看不到你的最终目标；
+- **DNS 不泄漏**：只把域名交给中转（SOCKS5 用域名地址类型），由中转侧解析；
+- **TLS 在隧道内完成**：HTTPS 目标是在中转隧道里做 TLS 握手，中转只看到 `host:port`；
+- **热更新**：面板保存后对后续请求立即生效；密码只写不读，接口只回 `***`，
+  `data/chain.json` 权限 600；
+- **重放也走链路**：面板里的「重放」同样经中转发出，避免抓包走后门、重放却裸奔。
+
+#### 实测对照（某云主机，链路为 1 跳 HTTP 中转）
+
+| 状态 | 目标站看到的来源 IP |
+|---|---|
+| 关闭（直连） | 本机公网 IP（如 `203.0.113.10`） |
+| 开启（经中转） | 中转侧出口 IP（如 `2408:8207:…`） |
+
 ---
 
 ## HTTPS 面板（可选）
@@ -296,6 +354,9 @@ python -m proxyscope [选项]
 --timeout 60           上游超时（秒）
 --debug                输出调试日志
 --no-web               只跑代理，不启 Web 界面
+--chain 'a:1,b:2'      出口链路：逗号分隔的中转地址，按顺序串联，指定即开启
+--chain-file PATH      链路配置文件（默认 <data-dir>/chain.json）
+--chain-allow-direct   链路失败时允许回落直连（默认禁止）
 ```
 
 ---
@@ -313,6 +374,10 @@ python -m proxyscope [选项]
 | `POST /api/flows/clear` | 清空全部记录 |
 | `GET /api/ca.crt` | 下载 CA 证书 |
 | `GET /api/health` | 健康检查 |
+| `GET /api/chain` | 出口链路配置与统计（密码掩码为 `***`） |
+| `POST /api/chain` | 保存并热应用链路配置：`{"enabled":true,"hops":[{"scheme":"socks5h","host":"1.2.3.4","port":1080,"username":"u","password":"p"}]}` |
+| `POST /api/chain/enable` | 只切开关：`{"enabled":true|false}` |
+| `POST /api/chain/test` | 沿链路探测出口 IP，返回 `chain_exit_ip` / `direct_exit_ip` / `hidden` |
 
 示例：
 

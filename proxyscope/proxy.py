@@ -205,6 +205,7 @@ class ProxyServer:
         on_flow: Callable[[int, dict], None] | None = None,
         debug: bool = False,
         auth: Any = None,
+        chain: Any = None,
     ):
         self.ca = ca
         self.store = store
@@ -214,6 +215,7 @@ class ProxyServer:
         self.on_flow = on_flow
         self.debug = debug
         self.auth = auth  # AuthStore | None
+        self.chain = chain  # ProxyChain | None（出口链路，可为 None 表示纯直连）
         self._tls_cache: dict[str, ssl.SSLContext] = {}
         self._server: asyncio.AbstractServer | None = None
         self._running = False
@@ -388,6 +390,47 @@ class ProxyServer:
             self._tls_cache[host] = ctx
         return ctx
 
+    # ---------------- 出站建连（含可选中转链路） ----------------
+    @property
+    def _chain_active(self) -> bool:
+        return self.chain is not None and self.chain.enabled
+
+    async def _open_upstream(self, host: str, port: int, use_tls: bool):
+        """建立到目标的连接。
+
+        链路开启时走「本机 → 中转1 → … → 目标」，TLS 在隧道内完成；
+        链路关闭时等价于原来的直连逻辑。链路失败默认直接抛错，
+        不会静默回落直连（防止链路已挂时泄漏本机真实 IP）。
+        """
+        if self._chain_active:
+            return await self.chain.open_stream(
+                host, port, use_tls,
+                self._upstream_ctx if use_tls else None,
+                timeout=self.upstream_timeout,
+            )
+        return await self._open_upstream_direct(host, port, use_tls)
+
+    async def _open_upstream_direct(self, host: str, port: int, use_tls: bool):
+        """不经中转的直连（链路上的兜底回落也复用这里）。"""
+        return await asyncio.wait_for(
+            asyncio.open_connection(
+                host, port,
+                ssl=self._upstream_ctx if use_tls else None,
+                server_hostname=host if use_tls else None,
+                limit=MAX_HEAD,
+            ),
+            timeout=self.upstream_timeout,
+        )
+
+    def _chain_note(self, error: str) -> str:
+        """把链路信息带进记录的 note，便于区分「经中转」和「直连」。"""
+        if not self._chain_active:
+            return ""
+        route = self.chain.route_label()
+        if error and not self.chain.allow_direct:
+            return f"chain:{route} failed"
+        return f"chain:{route}"
+
     # ---------------- 转发 ----------------
     async def _forward(self, reader: asyncio.StreamReader,
                        client_writer: asyncio.StreamWriter,
@@ -453,21 +496,40 @@ class ProxyServer:
 
         try:
             use_tls = scheme == "https"
-            up_reader, up_writer = await asyncio.wait_for(
-                asyncio.open_connection(
-                    host, port,
-                    ssl=self._upstream_ctx if use_tls else None,
-                    server_hostname=host if use_tls else None,
-                    limit=MAX_HEAD,
-                ),
-                timeout=self.upstream_timeout,
-            )
+            up_reader, up_writer = await self._open_upstream(host, port, use_tls)
+            if self._chain_active:
+                self.chain.note_ok()
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
-            return await self._reply_error(
-                client_writer, started, scheme, method, host, port, path,
-                query, version, headers, req_body, client_addr, error,
-            )
+            if self._chain_active:
+                self.chain.note_failure(exc)
+                # 只有显式打开 allow_direct 才回落直连；默认失败即失败，
+                # 避免链路已挂时悄悄用本机 IP 出站。
+                if not self.chain.allow_direct:
+                    error = f"出口链路失败（{self.chain.route_label()}）: {error}"
+                    return await self._reply_error(
+                        client_writer, started, scheme, method, host, port, path,
+                        query, version, headers, req_body, client_addr, error,
+                    )
+                try:
+                    use_tls = scheme == "https"
+                    up_reader, up_writer = await self._open_upstream_direct(
+                        host, port, use_tls)
+                    error = ""
+                    self._direct_fallback = True
+                except Exception as exc2:
+                    error = (f"出口链路失败且直连回落也失败: "
+                             f"{type(exc).__name__}: {exc}; "
+                             f"{type(exc2).__name__}: {exc2}")
+                    return await self._reply_error(
+                        client_writer, started, scheme, method, host, port, path,
+                        query, version, headers, req_body, client_addr, error,
+                    )
+            else:
+                return await self._reply_error(
+                    client_writer, started, scheme, method, host, port, path,
+                    query, version, headers, req_body, client_addr, error,
+                )
 
         try:
             up_writer.write(payload)
@@ -490,6 +552,7 @@ class ProxyServer:
                     resp_body="[WebSocket 隧道，未记录帧内容]".encode(),
                     duration_ms=(time.time() - started) * 1000,
                     tls=scheme == "https", client_addr=client_addr, error="",
+                    note=self._chain_note(""),
                 ))
                 return False
 
@@ -542,6 +605,7 @@ class ProxyServer:
             resp_headers=resp_headers.as_list(), resp_body=decoded,
             duration_ms=(time.time() - started) * 1000,
             tls=scheme == "https", client_addr=client_addr, error=error,
+            note=self._chain_note(error),
         ))
         return keep
 
@@ -567,6 +631,7 @@ class ProxyServer:
             resp_headers=[], resp_body=body,
             duration_ms=(time.time() - started) * 1000,
             tls=scheme == "https", client_addr=client_addr, error=error,
+            note=self._chain_note(error),
         ))
         return False
 

@@ -330,6 +330,58 @@ select.sel:hover{background-color:rgba(255,255,255,.075)}
 /* Running 圆点 & 实例条防错位 */
 .tag-dot{width:5px;height:5px;border-radius:50%;background:currentColor;animation:blink 1.8s infinite}
 
+/* ══════════ 出口链路弹窗 ══════════ */
+.chain-chip{
+  display:inline-flex;align-items:center;height:16px;padding:0 6px;margin-left:6px;
+  border-radius:20px;font-size:10px;font-weight:600;letter-spacing:.2px;
+  background:rgba(255,255,255,.08);color:var(--txt-dim);
+}
+.chain-chip.on{background:rgba(46,204,113,.16);color:#2ecc71}
+.chain-chip.err{background:rgba(255,86,86,.16);color:#ff6b6b}
+.chain-modal{width:min(820px,94vw);max-height:90vh}
+.chain-hd-sw{display:flex;align-items:center;gap:10px}
+.chain-body{display:flex;flex-direction:column;gap:12px}
+.chain-act{
+  display:flex;align-items:center;gap:10px;padding:11px 13px;border-radius:8px;
+  border:1px solid var(--line);background:rgba(255,255,255,.014);
+}
+.chain-act .ct{flex:1;font-size:12px;color:var(--txt-dim);line-height:1.5}
+.chain-act .ct b{display:block;color:var(--txt);font-size:12.5px;margin-bottom:2px}
+.chain-act.on{border-color:rgba(46,204,113,.35);background:rgba(46,204,113,.06)}
+.chain-list{display:flex;flex-direction:column;gap:8px}
+.chain-hop{
+  display:grid;grid-template-columns:26px 92px 1fr 78px 84px 1fr 28px;
+  gap:6px;align-items:center;
+}
+@media(max-width:760px){.chain-hop{grid-template-columns:1fr 1fr;gap:6px}}
+.chain-hop .idx{
+  width:22px;height:22px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-size:11px;font-weight:700;
+  background:rgba(79,140,255,.16);color:var(--brand);
+}
+.chain-hop select,.chain-hop input{
+  height:30px;border-radius:6px;border:1px solid var(--line);background:var(--input-bg,transparent);
+  color:var(--txt);padding:0 8px;font-size:11.5px;font-family:inherit;min-width:0;
+}
+.chain-hop button.del{
+  height:26px;width:26px;border-radius:6px;border:1px solid var(--line);
+  background:transparent;color:var(--txt-dim);cursor:pointer;line-height:1;
+}
+.chain-hop button.del:hover{color:#ff6b6b;border-color:rgba(255,86,86,.4)}
+.chain-route{
+  font-size:11.5px;color:var(--txt-dim);padding:9px 12px;border-radius:7px;
+  background:var(--code-bg);border:1px dashed var(--line);font-family:ui-monospace,monospace;
+  word-break:break-all;line-height:1.6;
+}
+.chain-probe{
+  font-size:11.5px;line-height:1.7;padding:9px 12px;border-radius:7px;
+  border:1px solid var(--line);background:rgba(255,255,255,.014);white-space:pre-wrap;
+  font-family:ui-monospace,monospace;display:none;
+}
+.chain-probe.on{display:block}
+.chain-ro{display:flex;gap:18px;flex-wrap:wrap;font-size:11.5px;color:var(--txt-dim)}
+.chain-ro label{display:flex;align-items:center;gap:5px;cursor:pointer}
+
 /* ══════════ 账号设置弹窗 ══════════ */
 .acc-modal{width:min(760px,92vw);max-height:88vh}
 .acc-tip{
@@ -647,6 +699,10 @@ html[data-theme="light"] mark.cmark{background:#ffe08a;color:#0f1720}
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
               客户端接入
             </button>
+            <button class="btn acc-btn" id="btnChain" title="让服务器的出站流量再经过中转代理，隐藏本机真实 IP">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="4" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="20" cy="12" r="2"/><line x1="6" y1="12" x2="10" y2="12"/><line x1="14" y1="12" x2="18" y2="12"/></svg>
+              出口链路<span class="chain-chip" id="chainChip">直连</span>
+            </button>
             <button class="btn acc-btn" id="btnAccount" title="设置代理与面板的访问账号密码">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
               账号设置
@@ -827,6 +883,47 @@ html[data-theme="light"] mark.cmark{background:#ffe08a;color:#0f1720}
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         手动下载
       </a>
+    </div>
+  </div>
+</div>
+
+<!-- 出口链路弹窗 -->
+<div class="modal chain-modal" id="chainModal">
+  <div class="m-hd">
+    <span class="ttl">出口链路（隐藏本机真实 IP）</span>
+    <button class="iconbtn" id="chainClose" title="关闭"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  </div>
+  <div class="m-bd">
+    <div class="chain-body">
+      <div class="acc-tip">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        关闭时：客户端 → 本机 → 目标站（直连）。开启后：客户端 → 本机 → 中转1 → … → 目标站，目标侧只能看到最后一跳的 IP。多跳按顺序串联，只把域名交给中转解析。
+      </div>
+
+      <div class="chain-act" id="chainAct">
+        <div class="ct"><b>总开关</b>关＝直连（默认）；开＝全部出站走下面的中转链路</div>
+        <label class="switch"><input type="checkbox" id="chainOn"><span class="sl"></span></label>
+      </div>
+
+      <div class="chain-list" id="chainList"></div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" id="chainAdd">＋ 添加一跳</button>
+        <button class="btn primary" id="chainSave">保存并生效</button>
+        <button class="btn" id="chainProbe">测试出口 IP</button>
+      </div>
+
+      <div class="chain-ro">
+        <label><input type="checkbox" id="chainVerify"> 校验中转/目标 TLS 证书</label>
+        <label title="默认关闭：链路挂了直接报错，绝不会偷偷走直连暴露本机 IP">
+          <input type="checkbox" id="chainAllowDirect"> 链路失败时允许回落直连（不推荐）
+        </label>
+        <label>单跳超时 <input type="number" id="chainTimeout" min="3" max="120" step="1" value="20" style="width:64px;height:24px;border-radius:5px;border:1px solid var(--line);background:transparent;color:var(--txt);padding:0 6px">s</label>
+      </div>
+
+      <div class="chain-route" id="chainRoute">链路：—</div>
+      <div class="chain-probe" id="chainProbeOut"></div>
+      <div class="acc-note" id="chainStat">—</div>
     </div>
   </div>
 </div>
@@ -1103,7 +1200,7 @@ function render(){
       <td><span class="${mCls(it.method)}">${esc(it.method)}</span></td>
       <td class="c-host" title="${esc(it.host)}">
         <strong>${esc(it.host)}</strong>
-        <div class="sub">${it.tls?'HTTPS · TLS':'HTTP · PLAIN'}</div>
+        <div class="sub">${it.tls?'HTTPS · TLS':'HTTP · PLAIN'}${it.note && it.note.startsWith('chain:') ? ' <span style="color:#2ecc71" title="经出口链路中转">· 中转</span>' : ''}</div>
       </td>
       <td class="c-path" title="${esc(it.path+(it.query?'?'+it.query:''))}">
         <code>${esc(it.path)}${it.query?'?'+esc(it.query):''}</code>
@@ -1585,6 +1682,147 @@ loadProxyUrl = function(){
 };
 // 重新触发一次，确保命令里带的是真实代理地址
 loadProxyUrl();
+
+// ───────── 出口链路 ─────────
+function chainHopRow(hop, idx){
+  const row = document.createElement('div');
+  row.className = 'chain-hop';
+  const schemeOpts = ['http','https','socks5','socks5h']
+    .map(s=>`<option value="${s}"${(hop&&hop.scheme===s)?' selected':''}>${s}</option>`).join('');
+  row.innerHTML =
+    `<span class="idx">${idx+1}</span>`+
+    `<select data-k="scheme">${schemeOpts}</select>`+
+    `<input data-k="host" placeholder="中转地址，如 1.2.3.4 或 proxy.example.com" value="${hop?(hop.host||''):''}">`+
+    `<input data-k="port" type="number" min="1" max="65535" placeholder="端口" value="${hop&&hop.port?hop.port:''}">`+
+    `<input data-k="username" placeholder="用户名(可选)" value="${hop?(hop.username||''):''}" autocomplete="off">`+
+    `<input data-k="password" type="password" placeholder="密码${hop&&hop.has_password?'（已保存，留空不改）':'(可选)'}" autocomplete="new-password">`+
+    `<button class="del" title="删除这一跳">✕</button>`;
+  row.querySelector('.del').onclick = ()=>{ row.remove(); relabelChain(); };
+  return row;
+}
+function relabelChain(){
+  document.querySelectorAll('#chainList .chain-hop .idx')
+    .forEach((el,i)=>{ el.textContent = i+1; });
+}
+function readChainForm(){
+  const hops = [];
+  document.querySelectorAll('#chainList .chain-hop').forEach(row=>{
+    const g = k => row.querySelector(`[data-k="${k}"]`).value.trim();
+    const host = g('host');
+    if(!host) return;
+    hops.push({
+      scheme: g('scheme'), host, port: g('port') || '',
+      username: g('username'), password: g('password'),
+    });
+  });
+  return {
+    enabled: $('#chainOn').checked,
+    hops,
+    verify: $('#chainVerify').checked,
+    allow_direct: $('#chainAllowDirect').checked,
+    timeout: Number($('#chainTimeout').value) || 20,
+  };
+}
+function renderChain(snap){
+  S.chain = snap || {};
+  const list = $('#chainList');
+  list.innerHTML = '';
+  const hops = (snap && snap.hops) || [];
+  if(!hops.length){ list.appendChild(chainHopRow(null, 0)); }
+  else hops.forEach((h,i)=> list.appendChild(chainHopRow(h,i)));
+  $('#chainOn').checked = !!(snap && snap.enabled);
+  $('#chainVerify').checked = !!(snap && snap.verify);
+  $('#chainAllowDirect').checked = !!(snap && snap.allow_direct);
+  $('#chainTimeout').value = (snap && snap.timeout) || 20;
+  $('#chainAct').classList.toggle('on', !!(snap && snap.enabled));
+  const active = !!(snap && snap.active);
+  $('#chainRoute').textContent = '链路：' + ((snap && snap.route && snap.route !== 'direct')
+    ? snap.route : (snap && snap.hop_count ? '已配置 ' + snap.hop_count + ' 跳（未启用）' : '直连（未配置中转）'));
+  const st = $('#chainStat');
+  if(!snap){ st.textContent = '出口链路模块未启用'; return; }
+  st.textContent = `当前状态：${active ? '经中转出站' : '直连'} · 经过 ${snap.hits||0} 次 · 失败 ${snap.failures||0} 次`
+    + (snap.last_error ? ` · 最近错误：${snap.last_error}` : '');
+  const chip = $('#chainChip');
+  chip.textContent = active ? `中转 ${snap.hop_count}` : '直连';
+  chip.className = 'chain-chip' + (active ? ' on' : (snap.failures ? ' err' : ''));
+}
+async function refreshChainChip(){
+  try{
+    const r = await fetch(api('/api/chain'));
+    if(!r.ok) return;
+    renderChain(await r.json());
+  }catch(e){/* 静默 */}
+}
+function openChain(){
+  fetch(api('/api/chain')).then(async r=>{
+    if(!r.ok) throw new Error('接口不可用');
+    renderChain(await r.json());
+    $('#chainProbeOut').classList.remove('on');
+    $('#chainModal').classList.add('on');
+    $('#mask').classList.add('on');
+  }).catch(e=>toast('读取链路配置失败: '+e.message,'err'));
+}
+async function saveChain(){
+  const btn = $('#chainSave');
+  const payload = readChainForm();
+  if(payload.enabled && !payload.hops.length){
+    toast('开启链路前请至少填写一个中转地址','err'); return;
+  }
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = '保存中…';
+  try{
+    const r = await fetch(api('/api/chain'),{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const j = await r.json();
+    if(j.error) throw new Error(j.error);
+    renderChain(j.chain);
+    toast(payload.enabled ? '出口链路已开启，立即生效' : '已切换为直连', 'ok');
+  }catch(e){
+    toast('保存失败: '+e.message,'err');
+  }finally{
+    btn.disabled = false; btn.textContent = old;
+  }
+}
+async function probeChain(){
+  const btn = $('#chainProbe');
+  const out = $('#chainProbeOut');
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = '探测中…';
+  out.classList.add('on');
+  out.textContent = '正在沿当前链路探测出口 IP…';
+  try{
+    const r = await fetch(api('/api/chain/test'),{
+      method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'
+    });
+    const j = await r.json();
+    if(j.error) throw new Error(j.error);
+    const lines = [];
+    lines.push(`链路：${j.route === 'direct' ? '直连' : j.route}`);
+    lines.push(`链路出口 IP ：${j.chain_exit_ip || '（获取失败）'}`);
+    if(j.direct_exit_ip) lines.push(`本机直连 IP：${j.direct_exit_ip}`);
+    if(j.ok) lines.push(j.hidden ? '✔ 出口已与直连不同，真实 IP 已隐藏' : '⚠ 链路出口与直连相同，可能没走到中转');
+    lines.push(`耗时 ${j.elapsed_ms} ms${j.status ? ' · HTTP ' + j.status : ''}`);
+    if(j.errors && j.errors.length) lines.push('错误：\n  ' + j.errors.join('\n  '));
+    out.textContent = lines.join('\n');
+    toast(j.ok ? (j.hidden ? '链路正常，出口已隐藏' : '链路可用（出口未变化）') : '链路探测失败', j.ok ? 'ok' : 'err');
+    refreshChainChip();
+  }catch(e){
+    out.textContent = '探测失败：' + e.message;
+    toast('探测失败: '+e.message,'err');
+  }finally{
+    btn.disabled = false; btn.textContent = old;
+  }
+}
+const _btnChain = $('#btnChain');
+if(_btnChain) _btnChain.onclick = openChain;
+$('#chainClose').onclick = ()=>{ $('#chainModal').classList.remove('on'); $('#mask').classList.remove('on'); };
+$('#chainAdd').onclick = ()=>{ $('#chainList').appendChild(chainHopRow(null, $('#chainList').children.length)); relabelChain(); };
+$('#chainSave').onclick = saveChain;
+$('#chainProbe').onclick = probeChain;
+$('#chainOn').onchange = ()=> $('#chainAct').classList.toggle('on', $('#chainOn').checked);
+setTimeout(refreshChainChip, 400);
 
 // ───────── 账号设置 ─────────
 function openAccount(){

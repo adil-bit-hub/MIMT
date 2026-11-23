@@ -260,7 +260,7 @@ class FlowStore:
         rows = conn.execute(
             f"""SELECT id,ts,scheme,method,host,port,path,query,status,
                        status_text,mime,req_size,resp_size,duration_ms,tls,
-                       error,client_addr
+                       error,client_addr,note
                 FROM flows{sql_where}
                 ORDER BY {order_sql} LIMIT ? OFFSET ?""",
             args + [max(1, min(int(limit), 500)), max(0, int(offset))],
