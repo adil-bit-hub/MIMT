@@ -305,7 +305,7 @@ class ProxyServer:
                         body_b = (f"407 Proxy Authentication Required: {reason}").encode()
                         writer.write(
                             b"HTTP/1.1 407 Proxy Authentication Required\r\n"
-                            b"Proxy-Authenticate: Basic realm=\"ProxyScope\"\r\n"
+                            b"Proxy-Authenticate: Basic realm=\"MIMT\"\r\n"
                             b"Content-Type: text/plain; charset=utf-8\r\n"
                             b"Content-Length: " + str(len(body_b)).encode() + b"\r\n"
                             b"Connection: close\r\n\r\n" + body_b
@@ -612,7 +612,7 @@ class ProxyServer:
     async def _reply_error(self, writer, started, scheme, method, host, port,
                            path, query, version, headers, req_body,
                            client_addr, error) -> bool:
-        body = f"ProxyScope 无法连接 {host}:{port}\n{error}\n".encode()
+        body = f"MIMT 无法连接 {host}:{port}\n{error}\n".encode()
         try:
             writer.write(
                 b"HTTP/1.1 502 Bad Gateway\r\n"

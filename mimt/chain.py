@@ -1,7 +1,7 @@
-"""出口链路（多级中转）：让 ProxyScope 自己的出站流量再经过中转代理。
+"""出口链路（多级中转）：让 MIMT 自己的出站流量再经过中转代理。
 
-默认链路是「客户端 → ProxyScope → 目标站」，目标侧看到的是本机公网 IP。
-开启链路后变成「客户端 → ProxyScope → 中转1 → 中转2 → … → 目标站」，
+默认链路是「客户端 → MIMT → 目标站」，目标侧看到的是本机公网 IP。
+开启链路后变成「客户端 → MIMT → 中转1 → 中转2 → … → 目标站」，
 目标侧只能看到最后一跳中转的 IP，本机真实 IP 不再出现在目标日志里。
 
 设计要点
@@ -400,7 +400,7 @@ class ProxyChain:
             f"CONNECT {target} HTTP/1.1",
             f"Host: {target}",
             "Proxy-Connection: keep-alive",
-            "User-Agent: ProxyScope-chain/1.0",
+            "User-Agent: MIMT-chain/1.0",
         ]
         if hop.username:
             token = base64.b64encode(
@@ -580,7 +580,7 @@ class ProxyChain:
         try:
             req = (
                 f"GET {path} HTTP/1.1\r\nHost: {host}\r\n"
-                "User-Agent: ProxyScope-chain-probe/1.0\r\nAccept: */*\r\n"
+                "User-Agent: MIMT-chain-probe/1.0\r\nAccept: */*\r\n"
                 "Connection: close\r\n\r\n"
             )
             writer.write(req.encode("latin-1"))
@@ -647,7 +647,7 @@ async def direct_exit_ip(timeout: float = 10.0, url: str = PROBE_URLS[0]) -> str
     try:
         writer.write((
             f"GET {path} HTTP/1.1\r\nHost: {host}\r\n"
-            "User-Agent: ProxyScope-direct-probe/1.0\r\nAccept: */*\r\n"
+            "User-Agent: MIMT-direct-probe/1.0\r\nAccept: */*\r\n"
             "Connection: close\r\n\r\n"
         ).encode("latin-1"))
         await writer.drain()

@@ -20,7 +20,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 
 class ApiHandler(BaseHTTPRequestHandler):
-    server_version = "ProxyScope/1.0"
+    server_version = "MIMT/1.0"
     protocol_version = "HTTP/1.1"
 
     store: FlowStore
@@ -77,7 +77,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         self._json({"error": msg}, code)
 
     # ---------------- 服务控制 ----------------
-    SERVICE_UNIT = "proxyscope.service"
+    SERVICE_UNIT = "mimt.service"
 
     def _service_status(self) -> dict:
         import subprocess
@@ -158,7 +158,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         body = json.dumps({"error": reason, "auth_required": True},
                           ensure_ascii=False).encode()
         self.send_response(401)
-        self.send_header("WWW-Authenticate", 'Basic realm="ProxyScope"')
+        self.send_header("WWW-Authenticate", 'Basic realm="MIMT"')
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
@@ -210,7 +210,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             if not ca:
                 return self._err("CA 未启用", 404)
             return self._send(200, ca, "application/x-x509-ca-cert", {
-                "Content-Disposition": 'attachment; filename="proxyscope-ca.crt"'
+                "Content-Disposition": 'attachment; filename="mimt-ca.crt"'
             })
         if path == "/api/auth":
             a = getattr(self.server, "auth", None)
@@ -252,9 +252,9 @@ class ApiHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pem = b""
             if not pem:
-                return self._err("CRL 未启用（需设置 PROXYSCOPE_CRL_URL）", 404)
+                return self._err("CRL 未启用（需设置 MIMT_CRL_URL）", 404)
             return self._send(200, pem, "application/pkix-crl", {
-                "Content-Disposition": 'attachment; filename="proxyscope-ca.crl"'
+                "Content-Disposition": 'attachment; filename="mimt-ca.crl"'
             })
         if path == "/api/health":
             return self._json({"ok": True, "ts": time.time()})
@@ -482,7 +482,7 @@ class WebUI:
         self._httpd.ca = self.ca
         self._httpd.chain = self.chain
         self._thread = threading.Thread(
-            target=self._httpd.serve_forever, name="proxyscope-web", daemon=True
+            target=self._httpd.serve_forever, name="mimt-web", daemon=True
         )
         self._thread.start()
 

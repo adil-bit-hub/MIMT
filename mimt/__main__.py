@@ -1,4 +1,4 @@
-"""ProxyScope 入口：同时拉起 MITM 代理与本地 Web 检索界面。"""
+"""MIMT 入口：同时拉起 MITM 代理与本地 Web 检索界面。"""
 from __future__ import annotations
 
 import argparse
@@ -27,7 +27,7 @@ BANNER = r"""
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="proxyscope",
+        prog="mimt",
         description="轻量 MITM 抓包代理 + 本地 Web 检索界面",
     )
     p.add_argument("--listen", default="127.0.0.1", help="代理监听地址（默认 127.0.0.1）")

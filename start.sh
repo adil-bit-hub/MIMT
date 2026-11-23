@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ProxyScope 启动脚本 (Linux / macOS)
+# MIMT 启动脚本 (Linux / macOS)
 #
 # 用法:
 #   ./start.sh                     使用默认端口启动
@@ -77,13 +77,13 @@ for arg in "$@"; do
       # 用户只是想看参数说明，跳过后续环境检查，直接交给 Python
       export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
       export PYTHONIOENCODING="utf-8"
-      exec "$PY" -m proxyscope --help
+      exec "$PY" -m mimt --help
       ;;
   esac
 done
 
-if [ -n "${PROXYSCOPE_OPENSSL:-}" ] && [ -x "${PROXYSCOPE_OPENSSL}" ]; then
-  ok "OpenSSL: $PROXYSCOPE_OPENSSL"
+if [ -n "${MIMT_OPENSSL:-}" ] && [ -x "${MIMT_OPENSSL}" ]; then
+  ok "OpenSSL: $MIMT_OPENSSL"
 elif command -v openssl >/dev/null 2>&1; then
   ok "OpenSSL: $(command -v openssl) ($(openssl version 2>/dev/null | cut -d' ' -f1-2))"
 else
@@ -162,7 +162,7 @@ export PYTHONIOENCODING="utf-8"
 export PYTHONUNBUFFERED="1"
 
 # ---------- 7. 提示如何信任 CA ----------
-CA_FILE="$DATA_DIR/certs/proxyscope-ca.crt"
+CA_FILE="$DATA_DIR/certs/mimt-ca.crt"
 if [ ! -f "$CA_FILE" ]; then
   info "首次运行，将自动生成根证书：$CA_FILE"
 fi
@@ -192,4 +192,4 @@ printf '%s\n' "${C_DIM}  停止服务: Ctrl+C${C_RST}"
 printf '\n'
 
 # ---------- 8. 启动 ----------
-exec "$PY" -m proxyscope "${ARGS[@]}" "$@"
+exec "$PY" -m mimt "${ARGS[@]}" "$@"

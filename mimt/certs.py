@@ -26,7 +26,7 @@ _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def find_openssl() -> str:
-    env = os.environ.get("PROXYSCOPE_OPENSSL")
+    env = os.environ.get("MIMT_OPENSSL")
     if env and Path(env).is_file():
         return env
     found = shutil.which("openssl")
@@ -40,18 +40,18 @@ def find_openssl() -> str:
         "  Linux : sudo apt install openssl   /   sudo yum install openssl\n"
         "  macOS : brew install openssl\n"
         "  Windows: 安装 Git for Windows\n"
-        "也可用环境变量 PROXYSCOPE_OPENSSL 指定 openssl 可执行文件路径。"
+        "也可用环境变量 MIMT_OPENSSL 指定 openssl 可执行文件路径。"
     )
 
 
 class CertAuthority:
     """自签 CA + 按域名签发叶子证书。"""
 
-    def __init__(self, cert_dir: Path, common_name: str = "ProxyScope Root CA"):
+    def __init__(self, cert_dir: Path, common_name: str = "MIMT Root CA"):
         self.cert_dir = Path(cert_dir)
         self.cert_dir.mkdir(parents=True, exist_ok=True)
-        self.ca_cert = self.cert_dir / "proxyscope-ca.crt"
-        self.ca_key = self.cert_dir / "proxyscope-ca.key"
+        self.ca_cert = self.cert_dir / "mimt-ca.crt"
+        self.ca_key = self.cert_dir / "mimt-ca.key"
         self.leaf_dir = self.cert_dir / "leaf"
         self.leaf_dir.mkdir(parents=True, exist_ok=True)
         self.common_name = common_name
@@ -62,12 +62,12 @@ class CertAuthority:
         # ── CRL（证书吊销列表）──
         # Windows Schannel 强制做吊销检查，自签证书若无 CRL 分发点会报
         #   CRYPT_E_NO_REVOCATION_CHECK (0x80092012)
-        # 设置 PROXYSCOPE_CRL_URL（如 http://1.2.3.4/ca.crl）后：
+        # 设置 MIMT_CRL_URL（如 http://1.2.3.4/ca.crl）后：
         #   1. 叶子证书会带上 crlDistributionPoints 扩展
         #   2. 启动时自动生成并维护 CRL 文件
         # 不设置则行为与旧版一致（浏览器不受影响，curl 需 --ssl-no-revoke）。
-        self.crl_url = (os.environ.get("PROXYSCOPE_CRL_URL") or "").strip()
-        self.crl_path = self.cert_dir / "proxyscope-ca.crl"
+        self.crl_url = (os.environ.get("MIMT_CRL_URL") or "").strip()
+        self.crl_path = self.cert_dir / "mimt-ca.crl"
         self.ca_db = self.cert_dir / "ca_db"
         if self.crl_url:
             self._ensure_crl()
@@ -88,7 +88,7 @@ class CertAuthority:
             self.openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes",
             "-keyout", str(self.ca_key), "-out", str(self.ca_cert),
             "-days", "3650", "-sha256",
-            "-subj", f"/CN={self.common_name}/O=ProxyScope",
+            "-subj", f"/CN={self.common_name}/O=MIMT",
             "-addext", "basicConstraints=critical,CA:TRUE",
             "-addext", "keyUsage=critical,digitalSignature,keyCertSign,cRLSign",
             "-addext", "subjectKeyIdentifier=hash",
@@ -191,7 +191,7 @@ class CertAuthority:
             self._run([
                 self.openssl, "req", "-newkey", "rsa:2048", "-nodes",
                 "-keyout", str(leaf_key), "-out", str(csr),
-                "-subj", f"/CN={cn}/O=ProxyScope",
+                "-subj", f"/CN={cn}/O=MIMT",
             ])
             self._run([
                 self.openssl, "x509", "-req", "-in", str(csr),

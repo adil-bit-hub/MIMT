@@ -1,4 +1,4 @@
-"""ProxyScope 内置认证模块。
+"""MIMT 内置认证模块。
 
 统一管理「代理端口」与「Web 面板」的凭据，数据落盘为 data/auth.json：
     {

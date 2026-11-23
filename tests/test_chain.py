@@ -1,5 +1,5 @@
 """本地自检：起一个假目标站 + 两个假中转（HTTP CONNECT / SOCKS5），
-验证 ProxyScope 链路开关的行为：
+验证 MIMT 链路开关的行为：
   1) 关闭时直连：记录 note 为空/无 chain 标记，目标看到的连接来自本机；
   2) 开启 HTTP 中转：目标侧看到的「上一跳」是中转代理；
   3) 中转挂掉：默认失败即失败，绝不回落直连（目标不应收到任何请求）；
@@ -15,8 +15,8 @@ import sys
 
 sys.path.insert(0, ".")
 
-from proxyscope.chain import ChainConfig, Hop, ProxyChain  # noqa: E402
-from proxyscope.proxy import ProxyServer  # noqa: E402
+from mimt.chain import ChainConfig, Hop, ProxyChain  # noqa: E402
+from mimt.proxy import ProxyServer  # noqa: E402
 
 TAG = socket.gethostname()
 
@@ -259,7 +259,7 @@ async def main():
     chain.apply({"allow_direct": False}, save=False)
 
     # ---- 5. 两跳串联 HTTP → SOCKS5 ----
-    print("[5] 两跳串联：ProxyScope → HTTP 中转 → SOCKS5 → 目标")
+    print("[5] 两跳串联：MIMT → HTTP 中转 → SOCKS5 → 目标")
     hp2 = FakeHttpProxy("http2")
     await hp2.start()
     s5 = FakeSocks5()

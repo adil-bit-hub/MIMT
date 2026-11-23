@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ProxyScope · MITM 流量</title>
+<title>MIMT · MITM 流量</title>
 <style>
 :root{
   --bg:#0b1017; --panel:rgba(255,255,255,.018); --card:#0d131b;
@@ -1575,7 +1575,7 @@ function buildCliData(){
 
   // ── Linux ──
   d.linux = {
-    cert: `curl -s ${base}/mitm-ca.crt | sudo tee /usr/local/share/ca-certificates/proxyscope.crt >/dev/null && sudo update-ca-certificates`,
+    cert: `curl -s ${base}/mitm-ca.crt | sudo tee /usr/local/share/ca-certificates/mimt.crt >/dev/null && sudo update-ca-certificates`,
     proxyReal: `echo 'export http_proxy=${full}' >> ~/.bashrc && echo 'export https_proxy=${full}' >> ~/.bashrc && export http_proxy='${full}' https_proxy='${full}'`,
     proxyShow: `echo 'export https_proxy=${masked}' >> ~/.bashrc`,
     verify: `curl -x "$https_proxy" https://example.com -I`,

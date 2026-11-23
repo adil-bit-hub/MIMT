@@ -1,10 +1,14 @@
-# ProxyScope
+# MIMT
 
-轻量 **MITM 抓包代理 + 本地 Web 检索界面**。启动一个代理端口，让流量经过它，
-所有请求与响应被记录下来，再通过浏览器界面按关键字 / 主机 / 状态码检索。
+**M**an-**i**n-the-**M**iddle **T**raffic —— 轻量 **MITM 抓包代理 + 本地 Web 检索界面**。
+启动一个代理端口，让流量经过它，所有请求与响应被记录下来，
+再通过浏览器界面按关键字 / 主机 / 状态码检索。
 
 定位类似 Burp Suite / Yakit 的「Proxy + HTTP History」部分，但只做一件事：
 **抓下来、存起来、查得到**。
+
+> v1.2.0 起支持**出口链路**：出站流量可再经多级中转代理，隐藏服务器真实 IP。
+> 原名 ProxyScope，v1.2.0 更名为 MIMT。
 
 ---
 
@@ -15,7 +19,7 @@
 ```
 start.bat                # 启动代理 (18888) + Web 界面 (18787)
 install-ca.bat           # 首次使用：安装根证书（HTTPS 解密必需）
-set-proxy.bat            # 让 Windows 系统代理指向 ProxyScope
+set-proxy.bat            # 让 Windows 系统代理指向 MIMT
 ```
 
 用完恢复直连：`set-proxy.bat off`
@@ -50,11 +54,11 @@ VERIFY_UPSTREAM=1 ./start.sh             # 校验上游证书
 
 ### 1. 内置认证（代理端 + 面板端）
 
-无需外加 nginx / tinyproxy，ProxyScope 自己校验 Basic 认证。
+无需外加 nginx / tinyproxy，MIMT 自己校验 Basic 认证。
 
 ```bash
 # 首次启动时直接指定账号
-python3 -m proxyscope --proxy-user psscan --proxy-pass '你的密码' \
+python3 -m mimt --proxy-user psscan --proxy-pass '你的密码' \
                       --panel-user psadmin --panel-pass '你的密码'
 ```
 
@@ -115,10 +119,10 @@ CRYPT_E_NO_REVOCATION_CHECK (0x80092012) - 吊销功能无法检查证书是否�
 ```
 
 设置环境变量即可自动解决 —— 叶子证书会带上 `crlDistributionPoints` 扩展，
-ProxyScope 启动时自动签发并维护 CRL 文件：
+MIMT 启动时自动签发并维护 CRL 文件：
 
 ```bash
-export PROXYSCOPE_CRL_URL="http://你的服务器IP/ca.crl"
+export MIMT_CRL_URL="http://你的服务器IP/ca.crl"
 ./start.sh
 ```
 
@@ -126,7 +130,7 @@ export PROXYSCOPE_CRL_URL="http://你的服务器IP/ca.crl"
 
 ```nginx
 location = /ca.crl {
-    alias /path/to/data/certs/proxyscope-ca.crl;
+    alias /path/to/data/certs/mimt-ca.crl;
     default_type application/pkix-crl;
     auth_basic off;
 }
@@ -157,7 +161,7 @@ http://<你的IP>/ca.crl          CRL
 
 ```bash
 # Linux
-curl -s http://IP/mitm-ca.crt | sudo tee /usr/local/share/ca-certificates/proxyscope.crt >/dev/null && sudo update-ca-certificates
+curl -s http://IP/mitm-ca.crt | sudo tee /usr/local/share/ca-certificates/mimt.crt >/dev/null && sudo update-ca-certificates
 
 # Windows (cmd)
 curl -s http://IP/mitm-ca.crt -o "%TEMP%\ps-ca.crt" && certutil -addstore -user Root "%TEMP%\ps-ca.crt" && del "%TEMP%\ps-ca.crt"
@@ -170,8 +174,8 @@ curl -s http://IP/mitm-ca.crt -o "%TEMP%\ps-ca.crt" && certutil -addstore -user 
 
 ### 8. 出口链路：多级中转，隐藏服务器真实 IP（v1.2.0）
 
-默认链路是「客户端 → ProxyScope → 目标站」，目标侧看到的是**本机公网 IP**。
-开启出口链路后变成「客户端 → ProxyScope → 中转1 → 中转2 → … → 目标站」，
+默认链路是「客户端 → MIMT → 目标站」，目标侧看到的是**本机公网 IP**。
+开启出口链路后变成「客户端 → MIMT → 中转1 → 中转2 → … → 目标站」，
 目标侧只能看到**最后一跳中转**的 IP。
 
 面板顶部「出口链路」按钮：
@@ -199,14 +203,14 @@ curl -s http://IP/mitm-ca.crt -o "%TEMP%\ps-ca.crt" && certutil -addstore -user 
 
 ```bash
 # 命令行直接指定一串中转（自动开启）
-python3 -m proxyscope --port 18888 \
+python3 -m mimt --port 18888 \
   --chain 'socks5h://user:pass@1.2.3.4:1080,http://5.6.7.8:8080'
 
 # 只指定配置文件位置，开关仍由面板控制
-python3 -m proxyscope --chain-file /opt/proxyscope/data/chain.json
+python3 -m mimt --chain-file /opt/mimt/data/chain.json
 
 # 允许链路失败回落直连（不推荐）
-python3 -m proxyscope --chain-allow-direct
+python3 -m mimt --chain-allow-direct
 ```
 
 要点：
@@ -249,7 +253,7 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
 ### Linux（Chrome / Chromium / curl / wget）
 
 ```bash
-sudo cp data/certs/proxyscope-ca.crt /usr/local/share/ca-certificates/proxyscope.crt
+sudo cp data/certs/mimt-ca.crt /usr/local/share/ca-certificates/mimt.crt
 sudo update-ca-certificates
 ```
 
@@ -260,27 +264,27 @@ Firefox 有独立证书库，需在界面里单独导入：
 
 ```bash
 sudo security add-trusted-cert -d -r trustRoot \
-  -k /Library/Keychains/System.keychain data/certs/proxyscope-ca.crt
+  -k /Library/Keychains/System.keychain data/certs/mimt-ca.crt
 ```
 
 ### 不装系统，只给单个工具用
 
 ```bash
-curl --proxy http://127.0.0.1:18888 --cacert data/certs/proxyscope-ca.crt https://example.com/
-export REQUESTS_CA_BUNDLE=$PWD/data/certs/proxyscope-ca.crt   # pip / requests
+curl --proxy http://127.0.0.1:18888 --cacert data/certs/mimt-ca.crt https://example.com/
+export REQUESTS_CA_BUNDLE=$PWD/data/certs/mimt-ca.crt   # pip / requests
 ```
 
 ---
 
 ## 为什么需要装证书
 
-HTTPS 要看到明文内容，代理必须在中间解密。ProxyScope 第一次运行会生成一套
-自签 CA（`data/certs/proxyscope-ca.crt`），用它给每个访问的域名动态签发证书。
+HTTPS 要看到明文内容，代理必须在中间解密。MIMT 第一次运行会生成一套
+自签 CA（`data/certs/mimt-ca.crt`），用它给每个访问的域名动态签发证书。
 
 只有系统信任了这个 CA，浏览器才不会报证书错误。
 
 卸载：Windows 用 `install-ca.bat remove`；Linux 删掉
-`/usr/local/share/ca-certificates/proxyscope.crt` 后执行
+`/usr/local/share/ca-certificates/mimt.crt` 后执行
 `sudo update-ca-certificates --fresh`。
 
 ---
@@ -303,15 +307,15 @@ ssh -L 18787:127.0.0.1:18787 -L 18888:127.0.0.1:18888 user@server
 用 systemd 常驻（可选）：
 
 ```ini
-# /etc/systemd/system/proxyscope.service
+# /etc/systemd/system/mimt.service
 [Unit]
-Description=ProxyScope
+Description=MIMT
 After=network.target
 
 [Service]
 User=youruser
-WorkingDirectory=/opt/ProxyScope
-ExecStart=/opt/ProxyScope/start.sh
+WorkingDirectory=/opt/MIMT
+ExecStart=/opt/MIMT/start.sh
 Restart=on-failure
 
 [Install]
@@ -342,7 +346,7 @@ WantedBy=multi-user.target
 ## 命令行参数
 
 ```
-python -m proxyscope [选项]
+python -m mimt [选项]
 
 --listen 127.0.0.1     代理监听地址（默认仅本机；需要局域网共享用 0.0.0.0）
 --port 18888           代理端口
@@ -402,8 +406,8 @@ curl "http://127.0.0.1:18787/api/flows?status=4xx,5xx"
 目录结构：
 
 ```
-ProxyScope/
-├─ proxyscope/
+MIMT/
+├─ mimt/
 │  ├─ certs.py      CA 与证书签发
 │  ├─ proxy.py      MITM 代理核心
 │  ├─ store.py      SQLite 存储与检索
